@@ -1,7 +1,18 @@
-// RandomModifyAttribute is a class, which is an Action
-//
-// It implements Perform (a method that takes an IContext)
-// by pulling a random float from GetNextModify (a uniform random distribution between min and max)
-// and invoking the target's BoostAttribute method with it
-
 package main
+
+import "github.com/johnicholas/decisionflex"
+import "math/rand"
+
+func uniform(min, max float64) float64 {
+	return rand.Float64()*(max-min) + min
+}
+
+type randomModifyAttribute struct {
+	target   booster
+	min, max float64
+}
+
+func (my randomModifyAttribute) Perform(context decisionflex.Context) {
+	my.target.boostAttribute(uniform(my.min, my.max))
+
+}

@@ -2,14 +2,7 @@ package main
 
 type personAttribute struct {
 	value float64
-	// gameobject gameobject
-}
-
-func newPersonAttribute(startingValue float64) *personAttribute {
-	answer := new(personAttribute)
-	answer.value = startingValue
-	answer.clamp()
-	return answer
+	// gameobject gameobject // TODO?
 }
 
 func (my *personAttribute) clamp() {
