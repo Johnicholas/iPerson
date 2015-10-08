@@ -255,7 +255,7 @@ func main() {
 		Actions:        []decisionflex.Performer{eject},
 	}
 
-	decider := decisionflex.Decisionflex{
+	decider := decisionflex.DecisionFlex{
 		Actions: []decisionflex.ActionConsiderations{
 			possiblyAcquireDry,
 			possiblyGoToTip,
@@ -272,7 +272,10 @@ func main() {
 			possiblyEject,
 		},
 		Enabled: true,
+                // Selector: decisionflex.SelectHighestScore{true},
+                Selector: decisionflex.SelectWeightedRandom{0.0},
 	}
+
 	answer := decider.PerformAction()
 
 	fmt.Println(answer.Score)

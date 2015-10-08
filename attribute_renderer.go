@@ -1,3 +1,5 @@
+package main
+
 // AttributeRenderer graphs all attributes over time, on screen
 //
 // AttributeRenderer has a float, sample interval, in [0, 2]
@@ -109,4 +111,4 @@
 // CalculateScreenCoord returns an appropriate place to put something
 //
 // ColorGenerator yields a sequence of random colors
-package main
+

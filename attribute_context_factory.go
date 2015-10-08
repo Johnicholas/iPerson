@@ -1,3 +1,5 @@
+package main
+
 // pushes the iPerson attributes into a single IContext
 //
 // an AttributeContextFactory is a SingleContextFactory
@@ -11,4 +13,4 @@
 //
 // AttributeContextFactory implements Awake by searching for all
 // components of type PersonAttribute in the children of the parent
-package main
+
