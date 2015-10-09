@@ -13,4 +13,3 @@ package main
 //
 // AttributeContextFactory implements Awake by searching for all
 // components of type PersonAttribute in the children of the parent
-
