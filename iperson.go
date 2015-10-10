@@ -54,9 +54,16 @@ func (e eject) Perform(context interface{}) {
 type dispenseOn struct{}
 
 func (d dispenseOn) Perform(context interface{}) {
-	// expect DRY
+	// preconditions
+	if context.(*catContext).SlideIs != DRY {
+		panic("dispense on when slide is not dry")
+	}
+	// expect FULL
+	if context.(*catContext).TipIs != FULL {
+		panic("dispense on when tip is not full")
+	}
+	// effects
 	context.(*catContext).SlideIs = WET
-	// expect CLEAN
 	context.(*catContext).TipIs = DIRTY
 }
 
@@ -71,8 +78,14 @@ func (l loadTip) Perform(context interface{}) {
 type aspirate struct{}
 
 func (a aspirate) Perform(context interface{}) {
-	// expect RobotIs == SAMPLE
-	// expect TipIs == CLEAN
+	// preconditions
+	if context.(*catContext).RobotAt != SAMPLE {
+		panic("aspirate when robot is not at sample cup")
+	}
+	if context.(*catContext).TipIs != CLEAN {
+		panic("aspirate when tip is not clean")
+	}
+	// effects
 	context.(*catContext).TipIs = FULL
 }
 
@@ -186,9 +199,9 @@ func (t tipIsNot) Consider(context interface{}) float64 {
 	}
 }
 
-type chooseFirstPossibleT struct{}
+type firstPossibleT struct{}
 
-func (c chooseFirstPossibleT) Choose(choices []decisionflex.ActionSelection) decisionflex.ActionSelection {
+func (c firstPossibleT) Choose(choices []decisionflex.ActionSelection) decisionflex.ActionSelection {
 	for _, choice := range choices {
 		if choice.Score > 0.0 {
 			return choice
@@ -197,7 +210,11 @@ func (c chooseFirstPossibleT) Choose(choices []decisionflex.ActionSelection) dec
 	return choices[len(choices)-1]
 }
 
-var chooseFirstPossible chooseFirstPossibleT
+func (c firstPossibleT) String() string {
+	return "choose first possible"
+}
+
+var firstPossible firstPossibleT
 
 func main() {
 	context := catContext{
@@ -209,147 +226,121 @@ func main() {
 	}
 
 	// if (dry>0&&dry_scheduled>0) fire(acquire_dry)
-	possiblyAcquireDry := decisionflex.ActionConsiderations{
-		ActionObject:   "possibly acquire dry",
-		Considerations: []decisionflex.Considerer{slideIs{DRY}, someDryScheduled{}},
-		Actions:        []decisionflex.Performer{acquireDry{}},
-	}
+	possiblyAcquireDry := decisionflex.NewActionConsiderations("acquire a dry reading")
+	possiblyAcquireDry.AddConsiderer(slideIs{DRY})
+	possiblyAcquireDry.AddConsiderer(someDryScheduled{})
+	possiblyAcquireDry.AddPerformer(acquireDry{})
+
 	// if (dry>0&&dry_scheduled==0&&at_slide>0&&clean==0) fire(at_tip)
-	possiblyGoToTip := decisionflex.ActionConsiderations{
-		ActionObject: "possibly go to tip",
-		Considerations: []decisionflex.Considerer{
-			slideIs{DRY},
-			noDryScheduled{},
-			robotAt{SLIDE},
-			tipIsNot{CLEAN},
-		},
-		Actions: []decisionflex.Performer{goTo{TIP}},
-	}
+	possiblyGoToTip := decisionflex.NewActionConsiderations("go to tip load station")
+	possiblyGoToTip.AddConsiderer(slideIs{DRY})
+	possiblyGoToTip.AddConsiderer(noDryScheduled{})
+	possiblyGoToTip.AddConsiderer(robotAt{SLIDE})
+	possiblyGoToTip.AddConsiderer(tipIsNot{CLEAN})
+	possiblyGoToTip.AddPerformer(goTo{TIP})
+
 	// if (dry>0&&dry_scheduled==0&&clean==0&&full==0&&at_tip>0) fire(load_tip)
-	possiblyLoadTip := decisionflex.ActionConsiderations{
-		ActionObject: "possibly load tip",
-		Considerations: []decisionflex.Considerer{
-			slideIs{DRY},
-			noDryScheduled{},
-			tipIsNot{CLEAN},
-			tipIsNot{FULL},
-			robotAt{TIP},
-		},
-		Actions: []decisionflex.Performer{loadTip{}},
-	}
+	possiblyLoadTip := decisionflex.NewActionConsiderations("load a tip")
+	possiblyLoadTip.AddConsiderer(slideIs{DRY})
+	possiblyLoadTip.AddConsiderer(noDryScheduled{})
+	possiblyLoadTip.AddConsiderer(tipIsNot{CLEAN})
+	possiblyLoadTip.AddConsiderer(tipIsNot{FULL})
+	possiblyLoadTip.AddConsiderer(robotAt{TIP})
+	possiblyLoadTip.AddPerformer(loadTip{})
+
 	// if(clean>0&&full==0&&at_tip>0) fire(at_slide)
-	possiblyGoToSlide := decisionflex.ActionConsiderations{
-		ActionObject: "possibly go to slide",
-		Considerations: []decisionflex.Considerer{
-			tipIs{CLEAN},
-			tipIsNot{FULL},
-			robotAt{TIP},
-		},
-		Actions: []decisionflex.Performer{goTo{SLIDE}},
-	}
+	possiblyGoToSlide := decisionflex.NewActionConsiderations("go to slide load station")
+	possiblyGoToSlide.AddConsiderer(tipIs{CLEAN})
+	possiblyGoToSlide.AddConsiderer(tipIsNot{FULL})
+	possiblyGoToSlide.AddConsiderer(robotAt{TIP})
+	possiblyGoToSlide.AddPerformer(goTo{SLIDE})
+
 	// if (clean>0&&full==0&&at_slide>0) fire(at_sample)
-	possiblyGoToSample := decisionflex.ActionConsiderations{
-		ActionObject: "possibly go to sample",
-		Considerations: []decisionflex.Considerer{
-			tipIs{CLEAN},
-			tipIsNot{FULL},
-			robotAt{SLIDE},
-		},
-		Actions: []decisionflex.Performer{goTo{SAMPLE}},
-	}
+	possiblyGoToSample := decisionflex.NewActionConsiderations("go to sample cup")
+	possiblyGoToSample.AddConsiderer(tipIs{CLEAN})
+	possiblyGoToSample.AddConsiderer(tipIsNot{FULL})
+	possiblyGoToSample.AddConsiderer(robotAt{SLIDE})
+	possiblyGoToSample.AddPerformer(goTo{SAMPLE})
+
 	// if (clean>0&&full==0&&at_sample>0) fire(aspirate)
-	possiblyAspirate := decisionflex.ActionConsiderations{
-		ActionObject: "possibly aspirate",
-		Considerations: []decisionflex.Considerer{
-			tipIs{CLEAN},
-			tipIsNot{FULL},
-			robotAt{SAMPLE},
-		},
-		Actions: []decisionflex.Performer{aspirate{}},
-	}
+	possiblyAspirate := decisionflex.NewActionConsiderations("aspirate from sample cup")
+	possiblyAspirate.AddConsiderer(tipIs{CLEAN})
+	possiblyAspirate.AddConsiderer(tipIsNot{FULL})
+	possiblyAspirate.AddConsiderer(robotAt{SAMPLE})
+	possiblyAspirate.AddPerformer(aspirate{})
+
 	// if (dry>0&&full>0&&at_sample>0) fire(at_dispense)
-	possiblyGoToDispense := decisionflex.ActionConsiderations{
-		ActionObject: "possibly go to dispense",
-		Considerations: []decisionflex.Considerer{
-			slideIs{DRY},
-			tipIs{FULL},
-			robotAt{SAMPLE},
-		},
-		Actions: []decisionflex.Performer{goTo{DISPENSE}},
-	}
+	possiblyGoToDispense := decisionflex.NewActionConsiderations("go to dispense station")
+	possiblyGoToDispense.AddConsiderer(slideIs{DRY})
+	possiblyGoToDispense.AddConsiderer(tipIs{FULL})
+	possiblyGoToDispense.AddConsiderer(robotAt{SAMPLE})
+	possiblyGoToDispense.AddPerformer(goTo{DISPENSE})
+
 	// if (dry>0&&full>0&&at_dispense) fire(dispense_on)
-	possiblyDispense := decisionflex.ActionConsiderations{
-		ActionObject: "possibly dispense sample onto slide",
-		Considerations: []decisionflex.Considerer{
-			slideIs{DRY},
-			tipIs{FULL},
-			robotAt{DISPENSE},
-		},
-		Actions: []decisionflex.Performer{dispenseOn{}},
-	}
+	possiblyDispense := decisionflex.NewActionConsiderations("dispense sample onto slide")
+	possiblyDispense.AddConsiderer(slideIs{DRY})
+	possiblyDispense.AddConsiderer(tipIs{FULL})
+	possiblyDispense.AddConsiderer(robotAt{DISPENSE})
+	possiblyDispense.AddPerformer(dispenseOn{})
+
 	// if (dirty>0&&at_dispense>0) fire(at_shucker)
-	possiblyGoToShucker := decisionflex.ActionConsiderations{
-		ActionObject:   "possibly go to shucker",
-		Considerations: []decisionflex.Considerer{tipIs{DIRTY}, robotAt{DISPENSE}},
-		Actions:        []decisionflex.Performer{goTo{SHUCKER}},
-	}
+	possiblyGoToShucker := decisionflex.NewActionConsiderations("go to tip shucker")
+	possiblyGoToShucker.AddConsiderer(tipIs{DIRTY})
+	possiblyGoToShucker.AddConsiderer(robotAt{DISPENSE})
+	possiblyGoToShucker.AddPerformer(goTo{SHUCKER})
+
 	// if (dirty>0&&at_shucker>0) fire(shuck_tip)
-	possiblyShuckTip := decisionflex.ActionConsiderations{
-		ActionObject:   "possibly shuck the tip",
-		Considerations: []decisionflex.Considerer{tipIs{DIRTY}, robotAt{SHUCKER}},
-		Actions:        []decisionflex.Performer{shuckTip{}},
-	}
+	possiblyShuckTip := decisionflex.NewActionConsiderations("shuck the tip")
+	possiblyShuckTip.AddConsiderer(tipIs{DIRTY})
+	possiblyShuckTip.AddConsiderer(robotAt{SHUCKER})
+	possiblyShuckTip.AddPerformer(shuckTip{})
+
 	// if (wet>0&&wet_schedule>0) fire(acquire_wet)
-	possiblyAcquireWet := decisionflex.ActionConsiderations{
-		ActionObject:   "possibly acquire wet",
-		Considerations: []decisionflex.Considerer{slideIs{WET}, someWetScheduled{}},
-		Actions:        []decisionflex.Performer{acquireWet{}},
-	}
+	possiblyAcquireWet := decisionflex.NewActionConsiderations("acquire a wet reading")
+	possiblyAcquireWet.AddConsiderer(slideIs{WET})
+	possiblyAcquireWet.AddConsiderer(someWetScheduled{})
+	possiblyAcquireWet.AddPerformer(acquireWet{})
+
 	// if (wet>0&&at_shucker>0) fire(at_eject)
-	possiblyGoToEject := decisionflex.ActionConsiderations{
-		ActionObject:   "possibly go to eject",
-		Considerations: []decisionflex.Considerer{slideIs{WET}, robotAt{SHUCKER}},
-		Actions:        []decisionflex.Performer{goTo{EJECT}},
-	}
+	possiblyGoToEject := decisionflex.NewActionConsiderations("go to eject station")
+	possiblyGoToEject.AddConsiderer(slideIs{WET})
+	possiblyGoToEject.AddConsiderer(robotAt{SHUCKER})
+	possiblyGoToEject.AddPerformer(goTo{EJECT})
+
 	// if (wet>0&&at_eject>0) fire(eject)
-	possiblyEject := decisionflex.ActionConsiderations{
-		ActionObject:   "possibly eject a slide",
-		Considerations: []decisionflex.Considerer{slideIs{WET}, robotAt{EJECT}},
-		Actions:        []decisionflex.Performer{eject{}},
-	}
-	idle := decisionflex.ActionConsiderations{
-		ActionObject: "nothing to do!",
-		Actions:      []decisionflex.Performer{decisionflex.Idle},
-	}
+	possiblyEject := decisionflex.NewActionConsiderations("eject a slide")
+	possiblyEject.AddConsiderer(slideIs{WET})
+	possiblyEject.AddConsiderer(robotAt{EJECT})
+	possiblyEject.AddPerformer(eject{})
 
-	decider := decisionflex.DecisionFlex{
-		Actions: []decisionflex.ActionConsiderations{
-			possiblyAcquireDry,
-			possiblyGoToTip,
-			possiblyLoadTip,
-			possiblyGoToSlide,
-			possiblyGoToSample,
-			possiblyAspirate,
-			possiblyGoToDispense,
-			possiblyDispense,
-			possiblyGoToShucker,
-			possiblyShuckTip,
-			possiblyAcquireWet,
-			possiblyGoToEject,
-			possiblyEject,
-			idle,
-		},
-		ContextFactory: decisionflex.SingleContextFactory{&context},
-		LoggingEnabled: true,
-		Selector:       chooseFirstPossible,
-	}
+	idle := decisionflex.NewActionConsiderations("nothing to do!")
 
-	for {
+	decider := decisionflex.New(
+		decisionflex.SingleContextFactory{&context},
+		firstPossible,
+	)
+	decider.Add(possiblyAcquireDry)
+	decider.Add(possiblyGoToTip)
+	decider.Add(possiblyLoadTip)
+	decider.Add(possiblyGoToSlide)
+	decider.Add(possiblyGoToSample)
+	decider.Add(possiblyAspirate)
+	decider.Add(possiblyGoToDispense)
+	decider.Add(possiblyDispense)
+	decider.Add(possiblyGoToShucker)
+	decider.Add(possiblyShuckTip)
+	decider.Add(possiblyAcquireWet)
+	decider.Add(possiblyGoToEject)
+	decider.Add(possiblyEject)
+	decider.Add(idle)
+
+	for i := 0; i < 100; i++ {
 		answer := decider.PerformAction()
-		fmt.Println(answer.Score)
-		fmt.Println(answer.ActionObject)
-		if answer.ActionObject == "nothing to do!" {
+		if answer.ActionObject == idle.ActionObject {
 			break
+		} else {
+			fmt.Println(answer.ActionObject)
 		}
+
 	}
 }
