@@ -100,6 +100,10 @@ func (s someDryScheduled) Consider(context interface{}) float64 {
 	}
 }
 
+func (s someDryScheduled) String() string {
+	return "some dry scheduled"
+}
+
 type noDryScheduled struct{}
 
 func (s noDryScheduled) Consider(context interface{}) float64 {
@@ -108,6 +112,10 @@ func (s noDryScheduled) Consider(context interface{}) float64 {
 	} else {
 		return 0.0
 	}
+}
+
+func (n noDryScheduled) String() string {
+	return "no dry scheduled"
 }
 
 type someWetScheduled struct{}
@@ -178,24 +186,37 @@ func (t tipIsNot) Consider(context interface{}) float64 {
 	}
 }
 
+type chooseFirstPossibleT struct{}
+
+func (c chooseFirstPossibleT) Choose(choices []decisionflex.ActionSelection) decisionflex.ActionSelection {
+	for _, choice := range choices {
+		if choice.Score > 0.0 {
+			return choice
+		}
+	}
+	return choices[len(choices)-1]
+}
+
+var chooseFirstPossible chooseFirstPossibleT
+
 func main() {
 	context := catContext{
 		DryScheduled: 3,
 		WetScheduled: 21,
 		RobotAt:      SLIDE,
-		// SlideIs: NONE,
+		SlideIs:      DRY,
 		// TipIs: NONE
 	}
 
 	// if (dry>0&&dry_scheduled>0) fire(acquire_dry)
 	possiblyAcquireDry := decisionflex.ActionConsiderations{
-		ActionsObject:  decisionflex.GameObject{"possibly acquire dry"},
+		ActionObject:   "possibly acquire dry",
 		Considerations: []decisionflex.Considerer{slideIs{DRY}, someDryScheduled{}},
 		Actions:        []decisionflex.Performer{acquireDry{}},
 	}
 	// if (dry>0&&dry_scheduled==0&&at_slide>0&&clean==0) fire(at_tip)
 	possiblyGoToTip := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly go to tip"},
+		ActionObject: "possibly go to tip",
 		Considerations: []decisionflex.Considerer{
 			slideIs{DRY},
 			noDryScheduled{},
@@ -206,7 +227,7 @@ func main() {
 	}
 	// if (dry>0&&dry_scheduled==0&&clean==0&&full==0&&at_tip>0) fire(load_tip)
 	possiblyLoadTip := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly load tip"},
+		ActionObject: "possibly load tip",
 		Considerations: []decisionflex.Considerer{
 			slideIs{DRY},
 			noDryScheduled{},
@@ -218,7 +239,7 @@ func main() {
 	}
 	// if(clean>0&&full==0&&at_tip>0) fire(at_slide)
 	possiblyGoToSlide := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly go to slide"},
+		ActionObject: "possibly go to slide",
 		Considerations: []decisionflex.Considerer{
 			tipIs{CLEAN},
 			tipIsNot{FULL},
@@ -228,7 +249,7 @@ func main() {
 	}
 	// if (clean>0&&full==0&&at_slide>0) fire(at_sample)
 	possiblyGoToSample := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly go to sample"},
+		ActionObject: "possibly go to sample",
 		Considerations: []decisionflex.Considerer{
 			tipIs{CLEAN},
 			tipIsNot{FULL},
@@ -238,7 +259,7 @@ func main() {
 	}
 	// if (clean>0&&full==0&&at_sample>0) fire(aspirate)
 	possiblyAspirate := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly aspirate"},
+		ActionObject: "possibly aspirate",
 		Considerations: []decisionflex.Considerer{
 			tipIs{CLEAN},
 			tipIsNot{FULL},
@@ -248,7 +269,7 @@ func main() {
 	}
 	// if (dry>0&&full>0&&at_sample>0) fire(at_dispense)
 	possiblyGoToDispense := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly go to dispense"},
+		ActionObject: "possibly go to dispense",
 		Considerations: []decisionflex.Considerer{
 			slideIs{DRY},
 			tipIs{FULL},
@@ -258,7 +279,7 @@ func main() {
 	}
 	// if (dry>0&&full>0&&at_dispense) fire(dispense_on)
 	possiblyDispense := decisionflex.ActionConsiderations{
-		ActionsObject: decisionflex.GameObject{"possibly dispense sample onto slide"},
+		ActionObject: "possibly dispense sample onto slide",
 		Considerations: []decisionflex.Considerer{
 			slideIs{DRY},
 			tipIs{FULL},
@@ -268,33 +289,37 @@ func main() {
 	}
 	// if (dirty>0&&at_dispense>0) fire(at_shucker)
 	possiblyGoToShucker := decisionflex.ActionConsiderations{
-		ActionsObject:  decisionflex.GameObject{"possibly go to shucker"},
+		ActionObject:   "possibly go to shucker",
 		Considerations: []decisionflex.Considerer{tipIs{DIRTY}, robotAt{DISPENSE}},
 		Actions:        []decisionflex.Performer{goTo{SHUCKER}},
 	}
 	// if (dirty>0&&at_shucker>0) fire(shuck_tip)
 	possiblyShuckTip := decisionflex.ActionConsiderations{
-		ActionsObject:  decisionflex.GameObject{"possibly shuck the tip"},
+		ActionObject:   "possibly shuck the tip",
 		Considerations: []decisionflex.Considerer{tipIs{DIRTY}, robotAt{SHUCKER}},
 		Actions:        []decisionflex.Performer{shuckTip{}},
 	}
 	// if (wet>0&&wet_schedule>0) fire(acquire_wet)
 	possiblyAcquireWet := decisionflex.ActionConsiderations{
-		ActionsObject:  decisionflex.GameObject{"possibly acquire wet"},
+		ActionObject:   "possibly acquire wet",
 		Considerations: []decisionflex.Considerer{slideIs{WET}, someWetScheduled{}},
 		Actions:        []decisionflex.Performer{acquireWet{}},
 	}
 	// if (wet>0&&at_shucker>0) fire(at_eject)
 	possiblyGoToEject := decisionflex.ActionConsiderations{
-		ActionsObject:  decisionflex.GameObject{"possibly go to eject"},
+		ActionObject:   "possibly go to eject",
 		Considerations: []decisionflex.Considerer{slideIs{WET}, robotAt{SHUCKER}},
 		Actions:        []decisionflex.Performer{goTo{EJECT}},
 	}
 	// if (wet>0&&at_eject>0) fire(eject)
 	possiblyEject := decisionflex.ActionConsiderations{
-		ActionsObject:  decisionflex.GameObject{"possibly eject a slide"},
+		ActionObject:   "possibly eject a slide",
 		Considerations: []decisionflex.Considerer{slideIs{WET}, robotAt{EJECT}},
 		Actions:        []decisionflex.Performer{eject{}},
+	}
+	idle := decisionflex.ActionConsiderations{
+		ActionObject: "nothing to do!",
+		Actions:      []decisionflex.Performer{decisionflex.Idle},
 	}
 
 	decider := decisionflex.DecisionFlex{
@@ -312,14 +337,19 @@ func main() {
 			possiblyAcquireWet,
 			possiblyGoToEject,
 			possiblyEject,
+			idle,
 		},
-		Enabled:        true,
-		Selector:       decisionflex.SelectWeightedRandom{0.0},
 		ContextFactory: decisionflex.SingleContextFactory{&context},
+		LoggingEnabled: true,
+		Selector:       chooseFirstPossible,
 	}
 
-	answer := decider.PerformAction()
-
-	fmt.Println(answer.Score)
-	fmt.Println(answer.ActionObject.Name)
+	for {
+		answer := decider.PerformAction()
+		fmt.Println(answer.Score)
+		fmt.Println(answer.ActionObject)
+		if answer.ActionObject == "nothing to do!" {
+			break
+		}
+	}
 }

@@ -1,6 +1,5 @@
 package main
 
-import "github.com/johnicholas/decisionflex"
 import "math/rand"
 
 func uniform(min, max float64) float64 {
@@ -12,7 +11,7 @@ type randomModifyAttribute struct {
 	min, max float64
 }
 
-func (my randomModifyAttribute) Perform(context decisionflex.Context) {
+func (my randomModifyAttribute) Perform(context interface{}) {
 	my.target.boostAttribute(uniform(my.min, my.max))
 
 }
