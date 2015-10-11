@@ -1,7 +1,7 @@
 package main
 
-import "fmt"
 import "github.com/johnicholas/decisionflex"
+import "os"
 
 const (
 	EJECT    = iota
@@ -115,22 +115,8 @@ func (t tipIsNot) Consider(context interface{}) float64 {
 	}
 }
 
-type firstPossibleT struct{}
-
-func (c firstPossibleT) Choose(choices []decisionflex.ActionSelection) decisionflex.ActionSelection {
-	for _, choice := range choices {
-		if choice.Score > 0.0 {
-			return choice
-		}
-	}
-	return choices[len(choices)-1]
-}
-
-func (c firstPossibleT) String() string {
-	return "choose first possible"
-}
-
-var firstPossible firstPossibleT
+// TODO: move AddConsiderer and AddPerformer from decisionflex to here
+// so that they can be specialized to catContext
 
 func main() {
 	context := catContext{
@@ -278,6 +264,7 @@ func main() {
 	// if (wet>0&&at_eject>0) fire(eject)
 	possiblyEject := decisionflex.NewActionConsiderations("eject a slide")
 	possiblyEject.AddConsiderer(slideIs{WET})
+        possiblyEject.AddConsiderer(tipIs{TIP_NONE})
 	possiblyEject.AddConsiderer(robotAt{EJECT})
 	possiblyEject.AddPerformer(catContextMutator(func(self *catContext) {
 		// preconditions
@@ -292,11 +279,14 @@ func main() {
 	}))
 
 	idle := decisionflex.NewActionConsiderations("nothing to do!")
+        idle.AddConsiderer(decisionflex.ScalarConsiderer{0.0})
 
 	decider := decisionflex.New(
 		decisionflex.SingleContextFactory{&context},
-		firstPossible,
+		// decisionflex.FirstPossible,
+                decisionflex.UniformRandom,
 	)
+	decider.Logger.SetOutput(os.Stdout)
 	decider.Add(possiblyAcquireDry)
 	decider.Add(possiblyGoToTip)
 	decider.Add(possiblyLoadTip)
@@ -312,13 +302,7 @@ func main() {
 	decider.Add(possiblyEject)
 	decider.Add(idle)
 
-	for i := 0; i < 100; i++ {
-		answer := decider.PerformAction()
-		if answer.ActionObject == idle.ActionObject {
-			break
-		} else {
-			fmt.Println(answer.ActionObject)
-		}
-
+	for i := 0; context.SlideIs != SLIDE_NONE && i < 100; i++ {
+		decider.PerformAction()
 	}
 }
