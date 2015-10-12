@@ -1,308 +1,356 @@
 package main
 
-import "github.com/johnicholas/decisionflex"
-import "os"
-
-const (
-	EJECT    = iota
-	SLIDE    = iota
-	TIP      = iota
-	SAMPLE   = iota
-	DISPENSE = iota
-	SHUCKER  = iota
+import (
+	"flag"
+	"fmt"
+	"github.com/johnicholas/decisionflex"
+	"log"
+	"math/rand"
+	"os"
+	"strings"
+	"time"
 )
 
-const (
-	SLIDE_NONE = iota
-	DRY        = iota
-	WET        = iota
-)
+type Location int
 
 const (
-	TIP_NONE = iota
-	CLEAN    = iota
-	FULL     = iota
-	DIRTY    = iota
+	EJECT    Location = iota
+	SLIDE             = iota
+	TIP               = iota
+	SAMPLE            = iota
+	DISPENSE          = iota
+	SHUCKER           = iota
 )
 
-type catContext struct {
+type SlideState int
+
+const (
+	NO_SLIDE SlideState = iota
+	DRY                 = iota
+	WET                 = iota
+)
+
+type TipState int
+
+const (
+	NO_TIP TipState = iota
+	CLEAN           = iota
+	FULL            = iota
+	DIRTY           = iota
+)
+
+type Context struct {
 	DryScheduled int
 	WetScheduled int
-	RobotAt      int // TODO: one of EJECT, SLIDE, etc
-	SlideIs      int // TODO: one of DRY, WET
-	TipIs        int // TODO: one of CLEAN, FULL, etc
+	RobotAt      Location
+	SlideIs      SlideState
+	TipIs        TipState
 }
 
-type catContextMutator func(*catContext)
-
-// catContext mutator methods can be Performers,
-// by casting the incoming context to a catContext
-func (self catContextMutator) Perform(context interface{}) {
-	self(context.(*catContext))
+func (c Context) String() string {
+	s := []string{
+		fmt.Sprintf("{\n"),
+		fmt.Sprintf("\tDryScheduled: %d\n", c.DryScheduled),
+		fmt.Sprintf("\tWetScheduled: %d\n", c.WetScheduled),
+		fmt.Sprintf("\tRobotAt: %d\n", c.RobotAt),
+		fmt.Sprintf("\tSlideIs: %d\n", c.SlideIs),
+		fmt.Sprintf("\tTipIs: %d\n", c.TipIs),
+		fmt.Sprintf("}\n"),
+	}
+	return strings.Join(s, "")
 }
 
-type goTo struct {
-	Destination int
+type catPrecondition struct {
+	test func(Context) bool
 }
 
-func (g goTo) Perform(context interface{}) {
-	context.(*catContext).RobotAt = g.Destination
-}
-
-// TODO: catContext accessor methods can be Considerers,
-// by casting the incoming context to a catContext?
-
-type catContextAccessor func(catContext) bool
-
-func (self catContextAccessor) Consider(context interface{}) float64 {
-	if self(*(context.(*catContext))) {
+func (c catPrecondition) Consider(i interface{}) float64 {
+	downcast := i.(*Context)
+	if c.test(*downcast) {
 		return 1.0
 	} else {
 		return 0.0
 	}
 }
 
-var someDryScheduled catContextAccessor = func(c catContext) bool { return c.DryScheduled > 0 }
-var noDryScheduled catContextAccessor = func(c catContext) bool { return c.DryScheduled == 0 }
-var someWetScheduled catContextAccessor = func(c catContext) bool { return c.WetScheduled > 0 }
-var noWetScheduled catContextAccessor = func(c catContext) bool { return c.WetScheduled == 0 }
-
-type robotAt struct {
-	Location int // TODO: one of EJECT, SLIDE, etc
+func someDryScheduled(c Context) bool {
+	return c.DryScheduled > 0
 }
 
-func (r robotAt) Consider(context interface{}) float64 {
-	if context.(*catContext).RobotAt == r.Location {
-		return 1.0
-	} else {
-		return 0.0
+func noDryScheduled(c Context) bool {
+	return c.DryScheduled == 0
+}
+
+func someWetScheduled(c Context) bool {
+	return c.WetScheduled > 0
+}
+
+func noWetScheduled(c Context) bool {
+	return c.WetScheduled == 0
+}
+
+func addPrecondition(r *decisionflex.Rule, toAdd func(Context) bool) {
+	r.Considerations = append(r.Considerations, catPrecondition{toAdd})
+}
+
+type catMutator struct {
+	toRun func(*Context)
+}
+
+func (c catMutator) Perform(i interface{}) {
+	downcast := i.(*Context)
+	c.toRun(downcast)
+}
+
+func goTo(l Location) func(c *Context) {
+	return func(c *Context) {
+		c.RobotAt = l
 	}
 }
 
-type slideIs struct {
-	State int // TODO: one of DRY, WET, etc
-}
-
-func (s slideIs) Consider(context interface{}) float64 {
-	if context.(*catContext).SlideIs == s.State {
-		return 1.0
-	} else {
-		return 0.0
+func robotAt(l Location) func(Context) bool {
+	return func(c Context) bool {
+		return c.RobotAt == l
 	}
 }
 
-type tipIs struct {
-	State int // TODO: one of TIP_NONE, CLEAN, FULL, etc
-}
-
-func (t tipIs) Consider(context interface{}) float64 {
-	if context.(*catContext).TipIs == t.State {
-		return 1.0
-	} else {
-		return 0.0
+func robotNotAt(l Location) func(Context) bool {
+	return func(c Context) bool {
+		return c.RobotAt != l
 	}
 }
 
-type tipIsNot struct {
-	State int // TODO: one of TIP_NONE, CLEAN, FULL, etc
-}
-
-func (t tipIsNot) Consider(context interface{}) float64 {
-	if context.(*catContext).TipIs != t.State {
-		return 1.0
-	} else {
-		return 0.0
+func slideIs(s SlideState) func(Context) bool {
+	return func(c Context) bool {
+		return c.SlideIs == s
 	}
 }
 
-// TODO: move AddConsiderer and AddPerformer from decisionflex to here
-// so that they can be specialized to catContext
+func tipIs(t TipState) func(Context) bool {
+	return func(c Context) bool {
+		return c.TipIs == t
+	}
+}
+
+func tipIsNot(t TipState) func(Context) bool {
+	return func(c Context) bool {
+		return c.TipIs != t
+	}
+}
+
+func addEffect(r *decisionflex.Rule, m func(*Context)) {
+	r.Actions = append(r.Actions, catMutator{m})
+}
+
+func addRule(d *decisionflex.DecisionFlex, r decisionflex.Rule) {
+	d.Rules = append(d.Rules, r)
+}
 
 func main() {
-	context := catContext{
+	context := Context{
 		DryScheduled: 3,
 		WetScheduled: 21,
 		RobotAt:      SLIDE,
 		SlideIs:      DRY,
-		// TipIs: NONE
+		// TipIs: NO_TIP
 	}
 
-	// if (dry>0&&dry_scheduled>0) fire(acquire_dry)
-	possiblyAcquireDry := decisionflex.NewActionConsiderations("acquire a dry reading")
-	possiblyAcquireDry.AddConsiderer(slideIs{DRY})
-	possiblyAcquireDry.AddConsiderer(someDryScheduled)
-	possiblyAcquireDry.AddPerformer(catContextMutator(func(self *catContext) {
-		// preconditions
-		if self.DryScheduled <= 0 {
-			panic("unscheduled acquire dry")
-		}
-		// effects
-		self.DryScheduled--
-	}))
-
 	// if (dry>0&&dry_scheduled==0&&at_slide>0&&clean==0) fire(at_tip)
-	possiblyGoToTip := decisionflex.NewActionConsiderations("go to tip load station")
-	possiblyGoToTip.AddConsiderer(slideIs{DRY})
-	possiblyGoToTip.AddConsiderer(noDryScheduled)
-	possiblyGoToTip.AddConsiderer(robotAt{SLIDE})
-	possiblyGoToTip.AddConsiderer(tipIsNot{CLEAN})
-	possiblyGoToTip.AddPerformer(goTo{TIP})
+	goToTip := decisionflex.Rule{Name: "go to tip load station"}
+	addPrecondition(&goToTip, slideIs(DRY))
+	addPrecondition(&goToTip, tipIs(NO_TIP))
+	addPrecondition(&goToTip, robotNotAt(TIP))
+	addEffect(&goToTip, goTo(TIP))
 
-	// if (dry>0&&dry_scheduled==0&&clean==0&&full==0&&at_tip>0) fire(load_tip)
-	possiblyLoadTip := decisionflex.NewActionConsiderations("load a tip")
-	possiblyLoadTip.AddConsiderer(slideIs{DRY})
-	possiblyLoadTip.AddConsiderer(noDryScheduled)
-	possiblyLoadTip.AddConsiderer(tipIsNot{CLEAN})
-	possiblyLoadTip.AddConsiderer(tipIsNot{FULL})
-	possiblyLoadTip.AddConsiderer(robotAt{TIP})
-	possiblyLoadTip.AddPerformer(catContextMutator(func(self *catContext) {
+	// if (dry>0&&dry_scheduled==0&&tip_none>0&&at_tip>0) fire(load_tip)
+	loadTip := decisionflex.Rule{Name: "load a tip"}
+	addPrecondition(&loadTip, slideIs(DRY))
+	addPrecondition(&loadTip, tipIs(NO_TIP))
+	addPrecondition(&loadTip, robotAt(TIP))
+	addEffect(&loadTip, func(c *Context) {
 		// preconditions
-		if self.RobotAt != TIP {
+		if c.RobotAt != TIP {
 			panic("load tip when robot is not at tip load station")
 		}
-		if self.TipIs != TIP_NONE {
+		if c.TipIs != NO_TIP {
 			panic("load tip with another tip already on proboscis")
 		}
 		// effects
-		self.TipIs = CLEAN
-	}))
+		c.TipIs = CLEAN
+	})
 
-	// if(clean>0&&full==0&&at_tip>0) fire(at_slide)
-	//possiblyGoToSlide := decisionflex.NewActionConsiderations("go to slide load station")
-	//possiblyGoToSlide.AddConsiderer(tipIs{CLEAN})
-	//possiblyGoToSlide.AddConsiderer(tipIsNot{FULL})
-	//possiblyGoToSlide.AddConsiderer(robotAt{TIP})
-	//possiblyGoToSlide.AddPerformer(goTo{SLIDE})
+	// if (clean>0&&at_sample==0) fire(at_sample)
+	goToSample := decisionflex.Rule{Name: "go to sample cup"}
+	addPrecondition(&goToSample, slideIs(DRY))
+	addPrecondition(&goToSample, tipIs(CLEAN))
+	addPrecondition(&goToSample, robotNotAt(SAMPLE))
+	addEffect(&goToSample, goTo(SAMPLE))
 
-	// if (clean>0&&full==0&&at_slide>0) fire(at_sample)
-	possiblyGoToSample := decisionflex.NewActionConsiderations("go to sample cup")
-	possiblyGoToSample.AddConsiderer(tipIs{CLEAN})
-	possiblyGoToSample.AddConsiderer(tipIsNot{FULL})
-	possiblyGoToSample.AddConsiderer(robotAt{TIP})
-	possiblyGoToSample.AddPerformer(goTo{SAMPLE})
-
-	// if (clean>0&&full==0&&at_sample>0) fire(aspirate)
-	possiblyAspirate := decisionflex.NewActionConsiderations("aspirate from sample cup")
-	possiblyAspirate.AddConsiderer(tipIs{CLEAN})
-	possiblyAspirate.AddConsiderer(tipIsNot{FULL})
-	possiblyAspirate.AddConsiderer(robotAt{SAMPLE})
-	possiblyAspirate.AddPerformer(catContextMutator(func(self *catContext) {
+	// if (clean>0&&at_sample>0) fire(aspirate)
+	aspirate := decisionflex.Rule{Name: "aspirate from sample cup"}
+	addPrecondition(&aspirate, slideIs(DRY))
+	addPrecondition(&aspirate, noDryScheduled)
+	addPrecondition(&aspirate, tipIs(CLEAN))
+	addPrecondition(&aspirate, robotAt(SAMPLE))
+	addEffect(&aspirate, func(c *Context) {
 		// preconditions
-		if self.RobotAt != SAMPLE {
+		if c.RobotAt != SAMPLE {
 			panic("aspirate while robot is not at sample cup")
 		}
-		if self.TipIs != CLEAN {
+		if c.TipIs != CLEAN {
 			panic("aspirate while tip is not clean")
 		}
 		// effects
-		self.TipIs = FULL
-	}))
+		c.TipIs = FULL
+	})
 
-	// if (dry>0&&full>0&&at_sample>0) fire(at_dispense)
-	possiblyGoToDispense := decisionflex.NewActionConsiderations("go to dispense station")
-	possiblyGoToDispense.AddConsiderer(slideIs{DRY})
-	possiblyGoToDispense.AddConsiderer(tipIs{FULL})
-	possiblyGoToDispense.AddConsiderer(robotAt{SAMPLE})
-	possiblyGoToDispense.AddPerformer(goTo{DISPENSE})
+	// if (dry>0&&full>0&&at_dispense==0) fire(at_dispense)
+	goToDispense := decisionflex.Rule{Name: "go to dispense station"}
+	addPrecondition(&goToDispense, slideIs(DRY))
+	addPrecondition(&goToDispense, noDryScheduled)
+	addPrecondition(&goToDispense, tipIs(FULL))
+	addPrecondition(&goToDispense, robotNotAt(DISPENSE))
+	addEffect(&goToDispense, goTo(DISPENSE))
 
 	// if (dry>0&&full>0&&at_dispense) fire(dispense_on)
-	possiblyDispense := decisionflex.NewActionConsiderations("dispense sample onto slide")
-	possiblyDispense.AddConsiderer(slideIs{DRY})
-	possiblyDispense.AddConsiderer(tipIs{FULL})
-	possiblyDispense.AddConsiderer(robotAt{DISPENSE})
-	possiblyDispense.AddPerformer(catContextMutator(func(self *catContext) {
+	dispense := decisionflex.Rule{Name: "dispense sample onto slide"}
+	addPrecondition(&dispense, slideIs(DRY))
+	addPrecondition(&dispense, noDryScheduled)
+	addPrecondition(&dispense, tipIs(FULL))
+	addPrecondition(&dispense, robotAt(DISPENSE))
+	addEffect(&dispense, func(c *Context) {
 		// preconditions
-		if self.SlideIs != DRY {
+		if c.SlideIs != DRY {
 			panic("dispense on slide when slide is not dry")
 		}
-		if self.TipIs != FULL {
+		if c.TipIs != FULL {
 			panic("dispense on slide when tip is not full")
 		}
 		// effects
-		self.SlideIs = WET
-		self.TipIs = DIRTY
-	}))
+		c.SlideIs = WET
+		c.TipIs = DIRTY
+	})
 
 	// if (dirty>0&&at_dispense>0) fire(at_shucker)
-	possiblyGoToShucker := decisionflex.NewActionConsiderations("go to tip shucker")
-	possiblyGoToShucker.AddConsiderer(tipIs{DIRTY})
-	possiblyGoToShucker.AddConsiderer(robotAt{DISPENSE})
-	possiblyGoToShucker.AddPerformer(goTo{SHUCKER})
+	goToShucker := decisionflex.Rule{Name: "go to tip shucker"}
+	addPrecondition(&goToShucker, tipIs(DIRTY))
+	addPrecondition(&goToShucker, robotNotAt(SHUCKER))
+	addEffect(&goToShucker, goTo(SHUCKER))
 
 	// if (dirty>0&&at_shucker>0) fire(shuck_tip)
-	possiblyShuckTip := decisionflex.NewActionConsiderations("shuck the tip")
-	possiblyShuckTip.AddConsiderer(tipIs{DIRTY})
-	possiblyShuckTip.AddConsiderer(robotAt{SHUCKER})
-	possiblyShuckTip.AddPerformer(catContextMutator(func(self *catContext) {
+	shuckTip := decisionflex.Rule{Name: "shuck the tip"}
+	addPrecondition(&shuckTip, tipIs(DIRTY))
+	addPrecondition(&shuckTip, robotAt(SHUCKER))
+	addEffect(&shuckTip, func(c *Context) {
 		// preconditions
-		if self.RobotAt != SHUCKER {
+		if c.RobotAt != SHUCKER {
 			panic("shuck tip while robot is not at tip shucker")
 		}
 		// effects
-		self.TipIs = TIP_NONE
-	}))
+		c.TipIs = NO_TIP
+	})
 
 	// if (wet>0&&wet_schedule>0) fire(acquire_wet)
-	possiblyAcquireWet := decisionflex.NewActionConsiderations("acquire a wet reading")
-	possiblyAcquireWet.AddConsiderer(slideIs{WET})
-	possiblyAcquireWet.AddConsiderer(someWetScheduled)
-	possiblyAcquireWet.AddPerformer(catContextMutator(func(self *catContext) {
+	acquireWet := decisionflex.Rule{Name: "acquire a wet reading"}
+	addPrecondition(&acquireWet, slideIs(WET))
+	addPrecondition(&acquireWet, someWetScheduled)
+	addEffect(&acquireWet, func(c *Context) {
 		// preconditions
-		if self.WetScheduled <= 0 {
+		if c.WetScheduled <= 0 {
 			panic("unscheduled acquire wet")
 		}
 		// effects
-		self.WetScheduled--
-	}))
+		c.WetScheduled--
+	})
 
-	// if (wet>0&&at_shucker>0) fire(at_eject)
-	possiblyGoToEject := decisionflex.NewActionConsiderations("go to eject station")
-	possiblyGoToEject.AddConsiderer(slideIs{WET})
-	possiblyGoToEject.AddConsiderer(robotAt{SHUCKER})
-	possiblyGoToEject.AddPerformer(goTo{EJECT})
+	// if (wet>0&&no_tip>0&&at_eject==0) fire(at_eject)
+	goToEject := decisionflex.Rule{Name: "go to eject station"}
+	addPrecondition(&goToEject, slideIs(WET))
+	addPrecondition(&goToEject, tipIs(NO_TIP))
+	addPrecondition(&goToEject, robotNotAt(EJECT))
+	addEffect(&goToEject, goTo(EJECT))
 
-	// if (wet>0&&at_eject>0) fire(eject)
-	possiblyEject := decisionflex.NewActionConsiderations("eject a slide")
-	possiblyEject.AddConsiderer(slideIs{WET})
-        possiblyEject.AddConsiderer(tipIs{TIP_NONE})
-	possiblyEject.AddConsiderer(robotAt{EJECT})
-	possiblyEject.AddPerformer(catContextMutator(func(self *catContext) {
+	// if (wet_scheduled==0&&no_tip>0&&at_eject>0) fire(eject)
+	eject := decisionflex.Rule{Name: "eject a slide"}
+	addPrecondition(&eject, noWetScheduled)
+	addPrecondition(&eject, tipIs(NO_TIP))
+	addPrecondition(&eject, robotAt(EJECT))
+	addEffect(&eject, func(c *Context) {
 		// preconditions
-		if self.RobotAt != EJECT {
+		if c.RobotAt != EJECT {
 			panic("eject when robot is not at eject station")
 		}
-		if self.TipIs != TIP_NONE {
+		if c.TipIs != NO_TIP {
 			panic("eject when proboscis has a tip on it")
 		}
 		// effect
-		self.SlideIs = SLIDE_NONE
-	}))
+		c.SlideIs = NO_SLIDE
+	})
 
-	idle := decisionflex.NewActionConsiderations("nothing to do!")
-        idle.AddConsiderer(decisionflex.ScalarConsiderer{0.0})
+	// if (dry>0&&dry_scheduled>0) fire(acquire_dry)
+	acquireDry := decisionflex.Rule{Name: "acquire a dry reading"}
+	addPrecondition(&acquireDry, slideIs(DRY))
+	addPrecondition(&acquireDry, someDryScheduled)
+	addEffect(&acquireDry, func(c *Context) {
+		// preconditions
+		if c.SlideIs != DRY {
+			panic("cannot take a dry read when slide is not dry")
+		}
+		if c.DryScheduled <= 0 {
+			panic("unscheduled acquire dry")
+		}
+		// effects
+		c.DryScheduled--
+	})
 
-	decider := decisionflex.New(
-		decisionflex.SingleContextFactory{&context},
-		// decisionflex.FirstPossible,
-                decisionflex.UniformRandom,
+	idle := decisionflex.Rule{
+		Name: "idle",
+		Considerations: []decisionflex.Consideration{
+			decisionflex.ScalarConsideration{0.0},
+		},
+		Actions: []decisionflex.Performer{},
+	}
+
+	seedPtr := flag.Int64(
+		"seed",
+		time.Now().UnixNano(), // default value
+		"seed for random number generator",
 	)
-	decider.Logger.SetOutput(os.Stdout)
-	decider.Add(possiblyAcquireDry)
-	decider.Add(possiblyGoToTip)
-	decider.Add(possiblyLoadTip)
-	// decider.Add(possiblyGoToSlide)
-	decider.Add(possiblyGoToSample)
-	decider.Add(possiblyAspirate)
-	decider.Add(possiblyGoToDispense)
-	decider.Add(possiblyDispense)
-	decider.Add(possiblyGoToShucker)
-	decider.Add(possiblyShuckTip)
-	decider.Add(possiblyAcquireWet)
-	decider.Add(possiblyGoToEject)
-	decider.Add(possiblyEject)
-	decider.Add(idle)
+	flag.Parse()
 
-	for i := 0; context.SlideIs != SLIDE_NONE && i < 100; i++ {
+	randPtr := rand.New(rand.NewSource(*seedPtr))
+
+	deciderOut := log.New(os.Stdout, "", 0)
+	decider := decisionflex.DecisionFlex{
+		ContextFactory: decisionflex.SingleContextFactory{&context},
+		// Chooser:        decisionflex.FirstPossible,
+		// Chooser: decisionflex.UniformRandom{*randPtr},
+		// Chooser: decisionflex.WeightedRandom{*randPtr},
+		Chooser: decisionflex.SoftMax{1.5, *randPtr},
+		Logger:  *deciderOut,
+	}
+
+	addRule(&decider, acquireDry)
+	addRule(&decider, acquireWet)
+
+	addRule(&decider, goToTip)
+	addRule(&decider, loadTip)
+
+	addRule(&decider, goToSample)
+	addRule(&decider, aspirate)
+
+	addRule(&decider, goToDispense)
+	addRule(&decider, dispense)
+
+	addRule(&decider, goToShucker)
+	addRule(&decider, shuckTip)
+
+	addRule(&decider, goToEject)
+	addRule(&decider, eject)
+
+	addRule(&decider, idle)
+
+	for i := 0; context.SlideIs != NO_SLIDE && i < 100; i++ {
 		decider.PerformAction()
 	}
 }
