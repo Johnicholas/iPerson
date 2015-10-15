@@ -277,15 +277,15 @@ func main() {
 			c.DryScheduled--
 		}}},
 	}
-
-	idle := decisionflex.Rule{
-		Name: "idle",
-		Considerations: []decisionflex.Consideration{
-			decisionflex.ScalarConsideration{0.0},
-		},
-		Actions: []decisionflex.Action{},
-	}
-
+	/*
+		idle := decisionflex.Rule{
+			Name: "idle",
+			Considerations: []decisionflex.Consideration{
+				decisionflex.ScalarConsideration{0.0},
+			},
+			Actions: []decisionflex.Action{},
+		}
+	*/
 	seedPtr := flag.Int64(
 		"seed",
 		time.Now().UnixNano(), // default value
@@ -293,8 +293,8 @@ func main() {
 	)
 	flag.Parse()
 
-	// randPtr := rand.New(rand.NewSource(*seedPtr))
-	_ = rand.New(rand.NewSource(*seedPtr))
+	randPtr := rand.New(rand.NewSource(*seedPtr))
+	// _ = rand.New(rand.NewSource(*seedPtr))
 
 	deciderOut := log.New(os.Stdout, "", 0)
 	decider := decisionflex.DecisionFlex{
@@ -303,7 +303,7 @@ func main() {
 		// Chooser: decisionflex.UniformRandom{*randPtr},
 		// Chooser: decisionflex.WeightedRandom{*randPtr},
 		// Chooser: decisionflex.SoftMax{0.5, *randPtr},
-		Chooser: decisionflex.OptimalStopping{1},
+		Chooser: decisionflex.OptimalStopping{1, *randPtr},
 		Rules: []decisionflex.Rule{
 			acquireDry,
 			acquireWet,
@@ -317,12 +317,12 @@ func main() {
 			shuckTip,
 			goToEject,
 			eject,
-			idle,
+			//			idle,
 		},
 		Logger: *deciderOut,
 	}
 
 	for i := 0; context.SlideIs != NO_SLIDE && i < 100; i++ {
-		decider.PerformAction()
+		decider.Perform(nil)
 	}
 }
